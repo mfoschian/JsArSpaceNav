@@ -1,0 +1,306 @@
+<html>
+<head>
+<script src="js/JSARToolKit.js"></script>
+<script src="js/WebCam.js"></script>
+<script src="js/HTML5.js"></script>
+<script src="js/JSAR.js"></script>
+<script>
+  DEBUG=true;
+  
+var html5 = new HTML5();
+
+var webcam = new WebCam(
+{
+	id: 'webcam'
+	,video: true 
+	,controls: true
+	,container: 'container'
+});
+
+
+var jsar = null;
+var infobox = null;
+var infobox2 = null;
+
+function setup()
+{
+	var container = document.getElementById('container') || document.body;
+
+	// AR video
+    canvas = document.createElement('canvas'); // canvas to draw our video on
+    canvas.width = webcam.opts.width || 320;
+    canvas.height = webcam.opts.height || 240;
+	canvas.style.border = '1px solid blue';
+    container.appendChild(canvas);
+
+	ctx = canvas.getContext('2d');
+
+	jsar = new JSAR( canvas, { threshold: getThreshold(), marker_size: 55 });
+
+
+	if( DEBUG == true )
+	{
+		var debugCanvas = document.createElement('canvas');
+		debugCanvas.width = 320;
+		debugCanvas.height = 240;
+		debugCanvas.id = 'debugCanvas';
+		container.appendChild(debugCanvas);
+	}
+
+	//infos.init();
+	infobox = new InfoBox('infobox');
+	infobox2 = new InfoBox('infobox2');
+}
+
+
+
+
+var markers = {};
+var age = 0;
+
+function InfoBox( name )
+{
+	this._el = document.getElementById(name);
+	this._name = name;
+	this.items = {};
+	this.set = function( name, value )
+	{
+		var e = this.items[name];
+		if(e)
+			e.innerHTML = value;
+	};
+	
+	if( !this._el )
+		return;
+
+	var items = this._el.getElementsByTagName('span');
+	for( var i=0; i<items.length; i++ )
+	{
+		var el = items[i];
+		var key = el.getAttribute('name') || el.getAttribute('id');
+		if( key )
+			this.items[key] = el;
+	}
+}
+
+
+
+function rad2deg(r)
+{
+	//return r;
+	return Math.round( (180 / Math.PI) * r );
+}
+function fix(f)
+{
+	//return f;
+	//return Math.round( f*100 ) / 100;
+	return Math.round( f );
+}
+
+
+function displayInfo(marker)
+{
+	var rm = marker.resultMat;
+	
+	if( !rm.has_value ) return;
+	if( rm.error > 5 ) return;
+	
+	// Coordinate Transform
+	if( !marker.T )
+	{
+
+		// First time we meet this marker: get the current matrix as base position
+		var R = JSARutil.inverseOf(rm);
+		
+		var t0 = JSARutil.extractTransl( rm );
+		//var a0 = {};
+		//rm.getZXYAngle(a0);
+		
+		marker.T = { R: R, t0: t0, err0: rm.error };
+		//marker.T = { a0: a0, t0: t0 };
+	}
+	
+	// transform coords relative to base position
+	var P = JSARutil.extractTransl( rm );
+	var P1 = JSARutil.vector.diff( P, marker.T.t0 );
+	var offset = JSARutil.transform(marker.T.R, P1);
+
+	var B = JSARutil.matrixMul( marker.T.R, rm );
+	var angles = JSARutil.getZXYAngle(B);
+
+	infobox.set( 'title', 'Transformed' );
+	infobox.set( 'angleX', rad2deg( angles.x ) );
+	infobox.set( 'angleY', rad2deg( angles.y ) );
+	infobox.set( 'angleZ', rad2deg( angles.z ) );
+	infobox.set( 'tx', fix( offset.x ) );
+	infobox.set( 'ty', fix( offset.y ) );
+	infobox.set( 'tz', fix( offset.z ) );
+	infobox.set( 'error', fix( marker.T.err0 ) );
+
+	rm.getZXYAngle(angles);
+	infobox2.set( 'title', 'rm' );
+	infobox2.set( 'angleX', rad2deg( angles.x ) );
+	infobox2.set( 'angleY', rad2deg( angles.y ) );
+	infobox2.set( 'angleZ', rad2deg( angles.z ) );
+	infobox2.set( 'tx', fix( P.x ) );
+	infobox2.set( 'ty', fix( P.y ) );
+	infobox2.set( 'tz', fix( P.z ) );
+	infobox2.set( 'error', fix(rm.error) );
+}
+
+
+function getThreshold()
+{
+	var el = document.getElementById('threshold');
+	if(el)
+	{
+		var th = parseInt(el.value);
+		if( !isNaN(th) )
+			return th;
+	}
+	return 100;
+}
+
+function test()
+{
+	
+	var ready = (webcam.video.readyState === webcam.video.HAVE_ENOUGH_DATA);
+	if(! ready )
+		return;
+
+	
+	ctx.drawImage(webcam.video, 0, 0, canvas.width, canvas.height);
+	jsar.changed(true);
+	jsar.setThreshold( getThreshold() );
+
+	// detect markers from the canvas (using the raster reader we created for it)
+	// use 170 as threshold value (0-255)
+	var detected = jsar.detect();
+	
+	var known = Object.keys(markers).length;
+	age++;
+	
+	//debugger;
+	for (var idx = 0; idx<detected; idx++)
+	{
+		var marker = jsar.marker(idx);
+		var known_marker = markers[ marker.id ];
+		if( !known_marker )
+		{
+			markers[ marker.id ] = marker;
+			known_marker = marker;
+			marker.status = 'new';
+			
+			console.log( 'new marker detected - '+marker.id );
+		}
+		else
+		{
+			known_marker.index = idx;
+			if( known_marker.status == 'lost' )
+				console.log( 'detected - '+known_marker.id );
+			
+			known_marker.status = 'known';
+		}
+
+		known_marker.age = age;
+		known_marker.update();
+		displayInfo(known_marker);
+	}
+
+	for( var k in markers )
+	{
+		var m = markers[k];
+		if( m.age != age && m.status != 'lost' )
+		{
+			m.status = 'lost';
+			console.log( 'lost marker '+m.id );
+			delete m.age;
+		}
+	}
+
+}
+
+var _run_ = false;
+function tick()
+{
+	if( !_run_ )
+		return;
+		
+	requestAnimationFrame(tick);
+	test();
+}
+
+
+
+
+window.onload = function()
+{
+	setup();
+	start();
+}
+
+
+function start()
+{
+	webcam.start();
+	_run_ = true;
+	requestAnimationFrame(tick);
+}
+function stop()
+{
+	_run_ = false;
+	webcam.stop();
+}
+function pause()
+{
+	_run_ = false;
+	webcam.pause();
+}
+</script>
+
+</head>
+<body>
+<div>
+	<input type="button" value="test" onclick="test()"></input>
+	<input type="button" value="start" onclick="start()"></input>
+	<input type="button" value="stop" onclick="stop()"></input>
+	<input type="button" value="pause" onclick="pause()"></input>
+	
+	<div id="container" style="border:1px solid black"></div>
+	
+	<div>
+		Threshold: <input type="text" value="70" id="threshold"></input>
+	</div>
+	
+	<div id="infobox" style="padding:1em; display:inline-block">
+		<div>-<b><span name="title"></span>-</b></div>
+		<div style="display:inline-block">
+			<div>AngleX: <span name="angleX">?</span></div>
+			<div>AngleY: <span name="angleY">?</span></div>
+			<div>AngleZ: <span name="angleZ">?</span></div>
+		</div>
+		<div style="display:inline-block; margin-left: 2em;">
+			<div>Tx: <span name="tx">?</span></div>
+			<div>Ty: <span name="ty">?</span></div>
+			<div>Tz: <span name="tz">?</span></div>
+		</div>
+		<div>Error: <span name="error">?</span></div>
+	</div>
+	
+	<div id="infobox2" style="padding:1em; display:inline-block">
+		<div>-<b><span name="title"></span></b>-</div>
+		<div style="display:inline-block">
+			<div>AngleX: <span name="angleX">?</span></div>
+			<div>AngleY: <span name="angleY">?</span></div>
+			<div>AngleZ: <span name="angleZ">?</span></div>
+		</div>
+		<div style="display:inline-block; margin-left: 2em;">
+			<div>Tx: <span name="tx">?</span></div>
+			<div>Ty: <span name="ty">?</span></div>
+			<div>Tz: <span name="tz">?</span></div>
+		</div>
+		<div>Error: <span name="error">?</span></div>
+	</div>
+</div>
+</body>
+</html>
