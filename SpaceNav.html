@@ -1,9 +1,16 @@
+<!doctype html>
 <html>
 <head>
 <script src="js/JSARToolKit.js"></script>
 <script src="js/WebCam.js"></script>
 <script src="js/HTML5.js"></script>
 <script src="js/JSAR.js"></script>
+
+<!-- Graphic 3D part -->
+
+<script src="js/three.min.js"></script>
+
+
 <script>
   DEBUG=true;
   
@@ -21,6 +28,89 @@ var webcam = new WebCam(
 var jsar = null;
 var infobox = null;
 var infobox2 = null;
+
+var _3D =
+{
+    // Set up the scene, camera, and renderer as global variables.
+    scene: null,
+	camera: null,
+	renderer: null,
+	light: null,
+	model: null,
+
+	render: function()
+	{
+		_3D.renderer.render( _3D.scene, _3D.camera);
+	},
+
+	init: function( opts )
+	{
+		var o = opts || {};
+		var wid = o.width || window.innerWidth;
+		var hei = o.height || window.innerHeight;
+		var model = o.model || {};
+		if( !model.name ) model.name = "models/android-animations.js";
+		if( !model.color ) model.color = 0x55B663;
+		
+		var camera = o.camera || {};
+		if( !camera.fov ) camera.fov = 60;
+		if( !camera.position ) camera.position = { x:0, y:0, z:-60 };
+		if( !camera.rotation ) camera.rotation = { x:0, y:Math.PI, z:0 };
+		if( !camera.clip ) camera.clip = { near: 0.1, far: 20000 };
+		
+		var antialias = (o.antialias == null ? true : !!o.antialias );
+		var bgcolor = o.background_color || 0x333F47;
+
+		var light = o.light || {};
+		if( !light.color ) light.color = 0xffffff;
+		if( !light.position ) light.position = { x:-100, y:200, z:100 };
+	
+		// Create the scene and set the scene size.
+		_3D.scene = new THREE.Scene();
+
+		// Create a renderer and add it to the DOM.
+		_3D.renderer = new THREE.WebGLRenderer({antialias:antialias});
+		_3D.renderer.setSize(wid, hei);
+		document.body.appendChild(_3D.renderer.domElement);
+
+		// Create a camera, zoom it out from the model a bit, and add it to the scene.
+		_3D.camera = new THREE.PerspectiveCamera(camera.fov, wid / hei, camera.clip.near, camera.clip.far);
+		_3D.camera.position.set(camera.position.x, camera.position.y, camera.position.z); // 0, 5, 60
+		_3D.camera.rotation.set(camera.rotation.x, camera.rotation.y, camera.rotation.z); // 0, 5, 60
+		_3D.scene.add(_3D.camera);
+
+		// Create an event listener that resizes the renderer with the browser window.
+		/*
+		window.addEventListener('resize', function()
+		{
+			var WIDTH = window.innerWidth,
+			var HEIGHT = window.innerHeight;
+			_3D.renderer.setSize(WIDTH, HEIGHT);
+			_3D.camera.aspect = WIDTH / HEIGHT;
+			_3D.camera.updateProjectionMatrix();
+		});
+		*/
+
+		// Set the background color of the scene.
+		//_3D.renderer.setClearColorHex(bgcolor, 1);
+		_3D.renderer.setClearColor(bgcolor, 1);
+
+		// Create a light, set its position, and add it to the scene.
+		_3D.light = new THREE.PointLight(light.color);
+		_3D.light.position.set(light.position.x, light.position.y, light.position.z); // -100,200,100);
+		_3D.scene.add(_3D.light);
+
+		// Load in the mesh and add it to the scene.
+		var loader = new THREE.JSONLoader();
+		//loader.load( "models/treehouse_logo.js", function(geometry){
+		loader.load( model.name, function(geometry)
+		{
+			var material = new THREE.MeshLambertMaterial({color: model.color});
+			_3D.model = new THREE.Mesh(geometry, material);
+			_3D.scene.add(_3D.model);
+		});
+	}
+};
 
 function setup()
 {
@@ -50,6 +140,13 @@ function setup()
 	//infos.init();
 	infobox = new InfoBox('infobox');
 	infobox2 = new InfoBox('infobox2');
+	
+	_3D.init(
+	{
+		width: 320,
+		height: 240
+		//,camera: { position: {x:0, y:0, z:60} }
+	});
 }
 
 
@@ -137,6 +234,22 @@ function displayInfo(marker)
 	infobox.set( 'tz', fix( offset.z ) );
 	infobox.set( 'error', fix( marker.T.err0 ) );
 
+	var _rot = true;
+	var _mov = true;
+	if( _rot )
+	{
+		_3D.model.rotation.x = angles.x;
+		_3D.model.rotation.y = angles.z;
+		_3D.model.rotation.z = angles.y; // + Math.PI;
+	}
+	
+	if( _mov )
+	{	
+		_3D.model.position.x = fix(offset.x);
+		_3D.model.position.y = fix(offset.z);
+		_3D.model.position.z = fix(offset.y);
+	}
+
 	rm.getZXYAngle(angles);
 	infobox2.set( 'title', 'rm' );
 	infobox2.set( 'angleX', rad2deg( angles.x ) );
@@ -146,6 +259,7 @@ function displayInfo(marker)
 	infobox2.set( 'ty', fix( P.y ) );
 	infobox2.set( 'tz', fix( P.z ) );
 	infobox2.set( 'error', fix(rm.error) );
+	
 }
 
 
@@ -163,7 +277,6 @@ function getThreshold()
 
 function test()
 {
-	
 	var ready = (webcam.video.readyState === webcam.video.HAVE_ENOUGH_DATA);
 	if(! ready )
 		return;
@@ -217,6 +330,8 @@ function test()
 			delete m.age;
 		}
 	}
+
+	_3D.render();
 
 }
 
